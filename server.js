@@ -1,7 +1,7 @@
 require('dotenv').config({ path: __dirname + '/.env' });
 const AWS = require('aws-sdk');
 const express = require('express');
-const helloWorld = require('./routes/hello-world');
+const groups = require('./routes/groups');
 
 AWS.config.update({
     region: process.env.REGION || 'us-east-1',
@@ -21,7 +21,7 @@ app.use((req, res, next) => {
     next();
 });
 
-app.use('/hello-world', helloWorld);
+app.use('/groups', groups);
 
 const port = process.env.PORT || 8001;
 app.listen(port, () => console.log(`Listening on ${port}!`));
