@@ -15,5 +15,5 @@ required variables:\
 `SECRET_KEY`: AWS Secret Key\
 optional variables:\
 `REGION`: AWS region (default: `us-east-1`)\
-`PORT`: server port (default: `8001`)
+`PORT`: server port (default: `8001`)\
 This file will be ignored by git.
