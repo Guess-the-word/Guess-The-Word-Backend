@@ -1,0 +1,40 @@
+{
+    "telemetry.enableTelemetry": false,
+    "telemetry.enableCrashReporter": false,
+    "files.autoSave": "afterDelay",
+    "workbench.startupEditor": "none",
+    "workbench.colorTheme": "Atom One Dark",
+    "workbench.iconTheme": "vscode-icons",
+    "workbench.tree.indent": 20,
+    "workbench.tree.renderIndentGuides": "always",
+    "workbench.colorCustomizations": {
+        //"tree.indentGuidesStroke": "#fe019a"
+        "tree.indentGuidesStroke": "#ff6ec7"
+    },
+    "editor.defaultFormatter": "HookyQR.beautify",
+    "editor.mouseWheelZoom": true,
+    "editor.renderWhitespace": "boundary",
+    "editor.renderControlCharacters": true,
+    "extensions.ignoreRecommendations": true,
+    "editor.fontSize": 14,
+    "editor.formatOnPaste": true,
+    "editor.formatOnSave": true,
+    "editor.multiCursorModifier": "ctrlCmd",
+    "editor.snippetSuggestions": "top",
+    "window.zoomLevel": 1,
+    "beautify.config": {
+        "space_after_anon_function": false
+    },
+    "codemetrics.basics.CodeLensHiddenUnder": 3,
+    "codemetrics.basics.ComplexityLevelLowDescription": "Nice clean code",
+    "codemetrics.basics.ComplexityLevelNormal": 10,
+    "codemetrics.basics.ComplexityLevelNormalDescription": "Getting harder to read",
+    "codemetrics.basics.ComplexityLevelHigh": 15,
+    "codemetrics.basics.ComplexityColorHigh": "#f44e34",
+    "codemetrics.basics.ComplexityLevelHighDescription": "Time to add some helper functions",
+    "codemetrics.basics.ComplexityLevelExtreme": 25,
+    "codemetrics.basics.ComplexityLevelExtremeDescription": "Refactor this unless it's a promise chain",
+    "codemetrics.basics.ComplexityTemplate": "Complexity is {0}. {1}",
+    "editor.suggestSelection": "first",
+    "vsintellicode.modify.editor.suggestSelection": "automaticallyOverrodeDefaultValue"
+}

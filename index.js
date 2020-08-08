@@ -1,15 +1,19 @@
 const http = require('http');
-
+const express = require('express');
+const app = express();
+const path = require('path');
+const router = express.Router();
+const axios = require('axios');
 const hostname = '127.0.0.1';
+
+const home_url = `http://${hostname}: ${port}/`;
 
 const port = 3000;
 
-const server = http.createServer((req, res) => {
-    res.statusCode = 200;
-    res.setHeader('Content-Type', 'text/plain');
-    res.end('Welcome to guess_the_word');
+router.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname+'/index.html'));
 })
 
-server.listen(port, hostname, () => {
-    console.log(`server running at http://${hostname}: ${port}/`)
-});
+app.use('/', router);
+app.listen(process.env.port || 3000);
+console.log('Running at port 3000')
