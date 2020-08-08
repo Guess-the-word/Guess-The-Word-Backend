@@ -1,0 +1,24 @@
+{
+  "name": "guess-the-word-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Guess-the-word/Guess-The-Word-Backend.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Guess-the-word/Guess-The-Word-Backend/issues"
+  },
+  "homepage": "https://github.com/Guess-the-word/Guess-The-Word-Backend#readme",
+  "dependencies": {
+    "axios": "^0.19.2",
+    "express": "^4.17.1",
+    "jquery": "^3.5.1"
+  }
+}
