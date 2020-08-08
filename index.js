@@ -6,8 +6,6 @@ const router = express.Router();
 const axios = require('axios');
 const hostname = '127.0.0.1';
 
-const home_url = `http://${hostname}: ${port}/`;
-
 const port = 3000;
 
 router.get('/', (req, res) => {
