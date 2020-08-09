@@ -70,6 +70,21 @@ io.on('connection', socket => {
         io.to(user.room).emit('message', formatMessage(`${user.username}: `, msg))
     })
 
+    //video stuff
+    socket.on('make-offer', function(data) {
+        socket.to(data.to).emit('offer-made', {
+            offer: data.offer,
+            socket: socket.id
+        });
+    });
+
+    socket.on('make-answer', function(data) {
+        socket.to(data.to).emit('answer-made', {
+            socket: socket.id,
+            answer: data.answer
+        });
+    });
+
     socket.on('disconnect', () => {
         const user = userLeaves(socket.id);
 
@@ -82,6 +97,7 @@ io.on('connection', socket => {
         }
     })
 })
+
 
 app.get('/', (req, res) => {
     res.render('../public/views/index')
