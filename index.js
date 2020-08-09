@@ -7,8 +7,15 @@ const ejs = require('ejs');
 var bodyParser = require('body-parser');
 const server = http.createServer(app);
 var user_name;
+var room_name;
 const io = socketio(server);
 const formatMessage = require('./utils/messages');
+const {
+    userJoin,
+    getCurrentUser,
+    userLeaves,
+    getRoomUsers
+} = require('./utils/users')
 
 app.use(bodyParser.json());
 
@@ -24,7 +31,7 @@ app.set('view engine', "ejs");
 
 // requests
 app.post('/room-req', (req, res) => {
-    const room_name = req.body.room_name;
+    room_name = req.body.room_name;
     user_name = req.body.user_name;
 
     // res.sendStatus(200)
@@ -33,26 +40,55 @@ app.post('/room-req', (req, res) => {
         user_name: user_name
     })
 })
+
+app.get
 io.on('connection', socket => {
-    //welcome current user
-    socket.emit('message', formatMessage('Guess_It Bot: ', 'welcome to your private room!'))
 
-    //broadcast when a user connects
-    socket.broadcast.emit('message', formatMessage('Guess_It Bot: ', 'Your friend has joined the room'));
+    socket.on('joinRoom', ({
+        username,
+        room
+    }) => {
 
-    //user disconnects
-    socket.on('disconnect', () => {
-        io.emit('message', formatMessage('Guess_It Bot: ', 'A user has left the chat!'))
+        const user = userJoin(socket.id, username,
+            room);
+        console.log(user);
+        socket.join(user.room);
+        //welcome current user
+        socket.emit('message', formatMessage('Guess_It Bot: ', 'welcome to your private room!'))
+
+        //broadcast when a user connects
+        socket.broadcast.to(user.room).emit('message', formatMessage('Guess_It Bot: ', `${user.username} has joined the room`));
+
+        io.to(user.room).emit('roomUsers', {
+            room: user.room,
+            users: getRoomUsers(user.room)
+        })
     })
 
-    //catch the chat message
     socket.on('chatMessage', msg => {
-        io.emit('message', formatMessage(`${user_name}: `, msg))
+        const user = getCurrentUser(socket.id)
+        io.to(user.room).emit('message', formatMessage(`${user.username}: `, msg))
+    })
+
+    socket.on('disconnect', () => {
+        const user = userLeaves(socket.id);
+
+        if (user) {
+            io.to(user.room).emit('message', formatMessage('Guess_It Bot: ', `${user.username} has left the chat`))
+            io.to(user.room).emit('roomUsers', {
+                room: user.room,
+                users: getRoomUsers(user.room)
+            })
+        }
     })
 })
 
 app.get('/', (req, res) => {
     res.render('../public/views/index')
+})
+
+app.get('/room_created.ejs', (req, res) => {
+    res.render('../public/views/room_created.ejs')
 })
 
 const PORT = process.env.port || 3000
