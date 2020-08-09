@@ -1,6 +1,7 @@
 const chatForm = document.getElementById('chat-form')
 const socket = io();
 const chatmsgs = document.getElementById('chat-msgs')
+const userName = document.getElementById("user").innerText;
 
 
 socket.on('message', message => {
@@ -19,6 +20,7 @@ chatForm.addEventListener('submit', e => {
 
     e.target.elements.msg.value = "";
     e.target.elements.msg.focus();
+    console.log(e.target.elements.msg)
 })
 
 function outputMessage(msg, time, user) {

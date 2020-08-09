@@ -6,6 +6,7 @@ const router = express.Router();
 const ejs = require('ejs');
 var bodyParser = require('body-parser');
 const server = http.createServer(app);
+var user_name;
 const io = socketio(server);
 const formatMessage = require('./utils/messages');
 
@@ -24,9 +25,12 @@ app.set('view engine', "ejs");
 // requests
 app.post('/room-req', (req, res) => {
     const room_name = req.body.room_name;
+    user_name = req.body.user_name;
+
     // res.sendStatus(200)
     res.render('../public/views/room_created', {
-        room_name: room_name
+        room_name: room_name,
+        user_name: user_name
     })
 })
 io.on('connection', socket => {
@@ -43,7 +47,7 @@ io.on('connection', socket => {
 
     //catch the chat message
     socket.on('chatMessage', msg => {
-        io.emit('message', formatMessage('user: ', msg))
+        io.emit('message', formatMessage(`${user_name}: `, msg))
     })
 })
 
