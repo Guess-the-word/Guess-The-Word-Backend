@@ -7,6 +7,7 @@ const ejs = require('ejs');
 var bodyParser = require('body-parser');
 const server = http.createServer(app);
 const io = socketio(server);
+const formatMessage = require('./utils/messages');
 
 app.use(bodyParser.json());
 
@@ -30,14 +31,19 @@ app.post('/room-req', (req, res) => {
 })
 io.on('connection', socket => {
     //welcome current user
-    socket.emit('message', 'welcome to your private room!')
+    socket.emit('message', formatMessage('Guess_It Bot: ', 'welcome to your private room!'))
 
     //broadcast when a user connects
-    socket.broadcast.emit('message', 'Your friend has joined the room');
+    socket.broadcast.emit('message', formatMessage('Guess_It Bot: ', 'Your friend has joined the room'));
 
     //user disconnects
     socket.on('disconnect', () => {
-        io.emit('message', 'A user has left the chat!')
+        io.emit('message', formatMessage('Guess_It Bot: ', 'A user has left the chat!'))
+    })
+
+    //catch the chat message
+    socket.on('chatMessage', msg => {
+        io.emit('message', formatMessage('user: ', msg))
     })
 })
 
