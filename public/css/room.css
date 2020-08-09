@@ -1,0 +1,15 @@
+html,
+body {
+    background-image: url(https://img.freepik.com/free-photo/interior-has-armchair-empty-white-wall-background_41470-730.jpg?size=626&ext=jpg);
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-position: center center;
+    background-attachment: fixed;
+    height: 100%;
+}
+
+h1 {
+    text-align: center;
+    color: green;
+}
+

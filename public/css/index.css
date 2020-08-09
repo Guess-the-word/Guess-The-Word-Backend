@@ -1,0 +1,57 @@
+html,
+body {
+    height: 100%;
+    width: 100%;
+}
+
+#label {
+    font-size: 7rem;
+    color: aliceblue;
+    display: inline-block;
+    margin: auto;
+}
+
+#welcome {
+    height: 75%;
+    background-color: red
+}
+
+.container {
+    min-height: 100%;
+    height: 100%;
+    min-width: 100%;
+    width: 100%;
+}
+
+.intro {
+    height: 60%;
+    background-color: rgb(246, 74, 74);
+    text-align: center;
+    box-shadow: 5px 10px;
+
+}
+
+.select_action {
+    height: 40%;
+    background-color: #ffd14d;
+}
+
+.create-join {
+    height: 100%;
+    width: 100%;
+    text-align: center;
+    margin: auto;
+    border-style: groove;
+    border-color: rgb(246, 74, 74);
+    border-width: 1px;
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* .center-me {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+} */
