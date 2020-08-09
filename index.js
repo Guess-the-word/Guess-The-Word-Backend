@@ -1,11 +1,12 @@
 const http = require('http');
+const socketio = require('socket.io')
 const express = require('express');
 const app = express();
-const path = require('path');
 const router = express.Router();
 const ejs = require('ejs');
 var bodyParser = require('body-parser');
-const $ = require('jquery')
+const server = http.createServer(app);
+const io = socketio(server);
 
 app.use(bodyParser.json());
 
@@ -16,19 +17,37 @@ app.use(bodyParser.urlencoded({
 app.use(express.static(__dirname + '/public'))
 
 app.set('view engine', "ejs");
+
+//run when user connects
+
+// requests
 app.post('/room-req', (req, res) => {
     const room_name = req.body.room_name;
     // res.sendStatus(200)
-    res.render('room_created', {
+    res.render('../public/views/room_created', {
         room_name: room_name
+    })
+})
+io.on('connection', socket => {
+    //welcome current user
+    socket.emit('message', 'welcome to your private room!')
+
+    //broadcast when a user connects
+    socket.broadcast.emit('message', 'Your friend has joined the room');
+
+    //user disconnects
+    socket.on('disconnect', () => {
+        io.emit('message', 'A user has left the chat!')
     })
 })
 
 app.get('/', (req, res) => {
-    res.render('index')
+    res.render('../public/views/index')
 })
 
-console.log(process.env.port)
+const PORT = process.env.port || 3000
+
 app.use('/', router);
-app.listen(process.env.port || 3000);
-console.log('Running at port 3000')
+server.listen(PORT, () => {
+    console.log('Running at port 3000')
+});
