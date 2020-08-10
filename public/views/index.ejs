@@ -27,12 +27,12 @@
             </div>
             <!-- later we change this to add users to existing rooms -->
             <div class="col create-join">
-                <form action="/room-req" method="POST">
-                    <input class="form-control" type="text" name="room_name" id="room_name" placeholder="Enter your room name">
+                <form action="/room_created.ejs">
+                    <input class="form-control" type="text" name="room_name" id="room_name" placeholder="Enter your room name" required>
                     <br>
-                    <input class="form-control" type="text" name="user_name" id="user_name" placeholder="Enter your name">
+                    <input class="form-control" type="text" name="user_name" id="user_name" placeholder="Enter your name" required>
                     <br>
-                    <button class="btn btn-primary" id="submit"> Join a Room! </button>
+                    <button class="btn btn-primary" id="submit"> Join the Room! </button>
                 </form>
             </div>
         </div>
