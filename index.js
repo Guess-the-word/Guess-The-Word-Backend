@@ -41,8 +41,20 @@ app.post('/room-req', (req, res) => {
     })
 })
 
-app.get
+let clients = 0
 io.on('connection', socket => {
+    socket.on('newClient', () => {
+        if (clients < 2) {
+            if (clients == 1) {
+                socket.emit('createPeer');
+            }
+        } else {
+            socket.emit('sessionActive');
+        }
+        clients++;
+    })
+    socket.on('Offer', sendOffer);
+    socket.on('Answer', sendAnswer)
 
     socket.on('joinRoom', ({
         username,
@@ -72,7 +84,9 @@ io.on('connection', socket => {
 
     socket.on('disconnect', () => {
         const user = userLeaves(socket.id);
-
+        if (clients > 0) {
+            clients--;
+        }
         if (user) {
             io.to(user.room).emit('message', formatMessage('Guess_It Bot: ', `${user.username} has left the chat`))
             io.to(user.room).emit('roomUsers', {
@@ -82,6 +96,14 @@ io.on('connection', socket => {
         }
     })
 })
+
+function sendOffer(offer) {
+    this.broadcast.emit('backOffer', offer);
+}
+
+function sendAnswer(data) {
+    this.broadcast.emit('backAnswer', data);
+}
 
 app.get('/', (req, res) => {
     res.render('../public/views/index')
