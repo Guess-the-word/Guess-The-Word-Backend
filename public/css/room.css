@@ -33,6 +33,7 @@ body {
     font-size: 16px;
     background: var(--light-color);
     margin: 20px;
+    position: relative;
 }
 
 ul {
@@ -219,5 +220,21 @@ video {
     flex-basis: 100%;
     flex: 1;
 }
+
+#initially_blurred {
+    filter: blur(4px);
+}
+
+#name-form {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+
+    display: flex block;
+    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: center;
+}
+
 
 /* testing */

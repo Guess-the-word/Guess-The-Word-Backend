@@ -13,20 +13,20 @@
 <body>
     <div class="container">
         <div class="row intro">
-            <h1 id="label" style="text-align: center;">Guess it</h1>
+            <img id="label" style="text-align: center;" src="../docs/guess_it_logo.svg" alt="guess_it_logo">
         </div>
         <div class="row select_action">
             <div class="col create-join">
                 <form action="/room_created.ejs">
                     <input class="form-control" type="text" name="room_name" id="room_name" placeholder="Enter your room name" required>
                     <br>
-                    <input class="form-control" type="text" name="user_name" id="user_name" placeholder="Enter your name" required>
-                    <br>
+                    <!-- <input class="form-control" type="text" name="user_name" id="user_name" placeholder="Enter your name" required>
+                    <br> -->
                     <button class="btn btn-primary" id="submit"> Create a Room! </button>
                 </form>
             </div>
             <!-- later we change this to add users to existing rooms -->
-            <div class="col create-join">
+            <!-- <div class="col create-join">
                 <form action="/room_created.ejs">
                     <input class="form-control" type="text" name="room_name" id="room_name" placeholder="Enter your room name" required>
                     <br>
@@ -34,7 +34,7 @@
                     <br>
                     <button class="btn btn-primary" id="submit"> Join the Room! </button>
                 </form>
-            </div>
+            </div> -->
         </div>
 
     </div>
