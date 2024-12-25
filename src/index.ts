@@ -8,15 +8,15 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
     origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-  },
+    methods: ["GET", "POST"]
+  }
 });
 
 app.use(cors());
 app.use(express.json());
 
 // --------------------------------
-// In-Memory Data (same as before)
+// Types & In-Memory State
 // --------------------------------
 interface RoomState {
   players: string[];
@@ -28,39 +28,52 @@ interface RoomState {
   score: { [teamId: string]: number };
   timer: NodeJS.Timeout | null;
   timeLeft: number;
+  nicknames: Record<string, string>; // NEW: to map socket.id -> funny name
 }
 
 const rooms: Record<string, RoomState> = {};
 
 const WORDS = [
-  "apple", "banana", "table", "soccer", "javascript", "elephant", "kangaroo",
-  "avocado", "spaceship", "submarine", "lighthouse", "telescope", "catch phrase",
+  "apple", "banana", "table", "soccer", "javascript",
+  "elephant", "kangaroo", "avocado", "spaceship",
+  "submarine", "lighthouse", "telescope", "catch phrase",
 ];
 
-// Utility to pick random word
+// Example silly name pieces (adjective + noun)
+const SILLY_ADJECTIVES = [
+  "Funky", "Flying", "Sparkly", "Noisy", "Jolly", "Zany", "Fuzzy", "Cuddly"
+];
+const SILLY_NOUNS = [
+  "Avocado", "Taco", "Penguin", "Panda", "Banana", "Ninja", "Tiger", "Unicorn"
+];
+
 function pickRandomWord() {
   const idx = Math.floor(Math.random() * WORDS.length);
   return WORDS[idx];
 }
 
+// Return something like "FlyingAvocado"
+function generateFunnyName(): string {
+  const adj = SILLY_ADJECTIVES[Math.floor(Math.random() * SILLY_ADJECTIVES.length)];
+  const noun = SILLY_NOUNS[Math.floor(Math.random() * SILLY_NOUNS.length)];
+  return `${adj}${noun}`;
+}
+
+// --------------------------------
+// Socket Events
+// --------------------------------
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  // ------------------------------------------------------
-  // 1. WebRTC Signaling Relay
-  // ------------------------------------------------------
+  // Minimal WebRTC relay
   socket.on('webrtc-signal', (payload) => {
-    // payload: { target, signal, callerId }
-    // We'll forward this to the target
     io.to(payload.target).emit('webrtc-signal', {
       signal: payload.signal,
       callerId: payload.callerId,
     });
   });
 
-  // ------------------------------------------------------
-  // 2. Join or Create a Room
-  // ------------------------------------------------------
+  // 1. Join or Create a Room
   socket.on('joinRoom', ({ roomName }) => {
     if (!rooms[roomName]) {
       rooms[roomName] = {
@@ -73,43 +86,40 @@ io.on('connection', (socket) => {
         score: {},
         timer: null,
         timeLeft: 0,
+        nicknames: {}, // initialize
       };
     }
-
     const room = rooms[roomName];
+
+    // If the user hasn't joined yet
     if (!room.players.includes(socket.id)) {
       room.players.push(socket.id);
+      // Generate a name for them
+      room.nicknames[socket.id] = generateFunnyName();
     }
     socket.join(roomName);
 
+    // If no teams exist, create them
     if (Object.keys(room.teams).length === 0) {
       room.teams['1'] = [];
       room.teams['2'] = [];
       room.score['1'] = 0;
       room.score['2'] = 0;
     }
-    // For simplicity, push all new players to team 1
+    // For simplicity, put all new players in Team 1
     if (!room.teams['1'].includes(socket.id) && !room.teams['2'].includes(socket.id)) {
       room.teams['1'].push(socket.id);
     }
 
-    io.to(roomName).emit('roomUpdate', {
-      roomName,
-      players: room.players,
-      status: room.status,
-      teams: room.teams,
-      score: room.score,
-      currentTeam: room.currentTeam,
-    });
+    broadcastRoomUpdate(roomName);
   });
 
-  // ------------------------------------------------------
-  // 3. Switch Team
-  // ------------------------------------------------------
+  // 2. Switch Team
   socket.on('switchTeam', ({ roomName, newTeam }) => {
     const room = rooms[roomName];
     if (!room) return;
 
+    // remove from old team
     for (const [teamId, arr] of Object.entries(room.teams)) {
       const i = arr.indexOf(socket.id);
       if (i >= 0) arr.splice(i, 1);
@@ -121,25 +131,17 @@ io.on('connection', (socket) => {
     }
     room.teams[newTeam].push(socket.id);
 
-    io.to(roomName).emit('roomUpdate', {
-      roomName,
-      players: room.players,
-      status: room.status,
-      teams: room.teams,
-      score: room.score,
-      currentTeam: room.currentTeam,
-    });
+    broadcastRoomUpdate(roomName);
   });
 
-  // ------------------------------------------------------
-  // 4. Start Game
-  // ------------------------------------------------------
+  // 3. Start Game
   socket.on('startGame', ({ roomName }) => {
     const room = rooms[roomName];
     if (!room) return;
     room.status = 'playing';
+
     room.currentTeam = 1;
-    if (room.teams[room.currentTeam].length === 0) {
+    if (room.teams['1'].length === 0) {
       room.currentTeam = 2;
     }
     room.describer = room.teams[room.currentTeam][0] || null;
@@ -157,17 +159,18 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ------------------------------------------------------
-  // 5. Guess a Word
-  // ------------------------------------------------------
+  // 4. Guess Word => correct or not
   socket.on('guessWord', ({ roomName, guess }) => {
     const room = rooms[roomName];
     if (!room || !room.word) return;
 
-    if (guess.toLowerCase() === room.word.toLowerCase()) {
+    const isCorrect = guess.toLowerCase() === room.word.toLowerCase();
+    if (isCorrect) {
       room.score[room.currentTeam] = (room.score[room.currentTeam] || 0) + 1;
 
-      io.to(roomName).emit('correctGuess', {
+      io.to(roomName).emit('guessResult', {
+        guess,
+        correct: true,
         team: room.currentTeam,
         word: room.word,
         score: room.score,
@@ -177,53 +180,82 @@ io.on('connection', (socket) => {
         clearInterval(room.timer);
         room.timer = null;
       }
-
       nextTurn(roomName);
+    } else {
+      io.to(roomName).emit('guessResult', {
+        guess,
+        correct: false,
+      });
     }
   });
 
-  // ------------------------------------------------------
-  // 6. Disconnect Cleanup
-  // ------------------------------------------------------
+  // 5. Reset Game => clears everything
+  socket.on('resetGame', ({ roomName }) => {
+    const room = rooms[roomName];
+    if (!room) return;
+
+    room.status = 'waiting';
+    room.word = null;
+    room.describer = null;
+    if (room.timer) {
+      clearInterval(room.timer);
+      room.timer = null;
+    }
+    room.timeLeft = 0;
+    Object.keys(room.score).forEach((key) => {
+      room.score[key] = 0;
+    });
+
+    broadcastRoomUpdate(roomName);
+  });
+
+  // 6. Disconnect => clean up
   socket.on('disconnect', () => {
-    Object.entries(rooms).forEach(([roomName, room]) => {
+    Object.entries(rooms).forEach(([rName, room]) => {
       const i = room.players.indexOf(socket.id);
       if (i >= 0) {
         room.players.splice(i, 1);
+        delete room.nicknames[socket.id]; // remove their name
 
-        // remove from teams
-        for (const [teamId, arr] of Object.entries(room.teams)) {
+        for (const arr of Object.values(room.teams)) {
           const idx = arr.indexOf(socket.id);
           if (idx >= 0) arr.splice(idx, 1);
         }
 
         if (room.players.length === 0) {
           if (room.timer) clearInterval(room.timer);
-          delete rooms[roomName];
+          delete rooms[rName];
         } else {
-          io.to(roomName).emit('roomUpdate', {
-            roomName,
-            players: room.players,
-            status: room.status,
-            teams: room.teams,
-            score: room.score,
-            currentTeam: room.currentTeam,
-          });
+          broadcastRoomUpdate(rName);
         }
       }
     });
   });
 });
 
-// ------------------------------------------------------
-// Helper Functions
-// ------------------------------------------------------
+// Helper to broadcast updated room info
+function broadcastRoomUpdate(roomName: string) {
+  const room = rooms[roomName];
+  if (!room) return;
+
+  io.to(roomName).emit('roomUpdate', {
+    roomName,
+    players: room.players,
+    status: room.status,
+    teams: room.teams,
+    score: room.score,
+    currentTeam: room.currentTeam,
+    nicknames: room.nicknames, // <--- pass the names
+  });
+}
+
+// Timer & Next Turn
 function startTimer(roomName: string, duration: number) {
   const room = rooms[roomName];
   if (!room) return;
-  room.timeLeft = duration;
 
-  const tick = () => {
+  room.timeLeft = duration;
+  room.timer = setInterval(() => {
     room.timeLeft -= 1;
     io.to(roomName).emit('timerUpdate', { timeLeft: room.timeLeft });
     if (room.timeLeft <= 0) {
@@ -232,22 +264,17 @@ function startTimer(roomName: string, duration: number) {
       io.to(roomName).emit('timeUp', {});
       nextTurn(roomName);
     }
-  };
-
-  room.timer = setInterval(tick, 1000);
+  }, 1000);
 }
 
 function nextTurn(roomName: string) {
   const room = rooms[roomName];
   if (!room) return;
 
-  if (room.currentTeam === 1) {
-    room.currentTeam = 2;
-  } else {
-    room.currentTeam = 1;
-  }
+  room.currentTeam = (room.currentTeam === 1) ? 2 : 1;
   if (room.teams[room.currentTeam].length === 0) return;
-  room.describer = room.teams[room.currentTeam][0] || null;
+
+  room.describer = room.teams[room.currentTeam][0];
   room.word = pickRandomWord();
   startTimer(roomName, 60);
 
@@ -256,18 +283,16 @@ function nextTurn(roomName: string) {
     describer: room.describer,
     score: room.score,
   });
-
   if (room.describer) {
     io.to(room.describer).emit('yourWord', { word: room.word });
   }
 }
 
-// Express route
+// Express
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
-// Start server
 const PORT = process.env.PORT || 4000;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
