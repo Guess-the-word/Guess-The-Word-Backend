@@ -140,10 +140,16 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.status = 'playing';
 
-    room.currentTeam = 1;
-    if (room.teams['1'].length === 0) {
+    // pick the first team that has players
+    if (room.teams['1'].length > 0) {
+      room.currentTeam = 1;
+    } else if (room.teams['2'].length > 0) {
       room.currentTeam = 2;
+    } else {
+      // no players to start the game
+      return;
     }
+
     room.describer = room.teams[room.currentTeam][0] || null;
     room.word = pickRandomWord();
     startTimer(roomName, 60);
@@ -271,7 +277,14 @@ function nextTurn(roomName: string) {
   const room = rooms[roomName];
   if (!room) return;
 
-  room.currentTeam = (room.currentTeam === 1) ? 2 : 1;
+  const proposedTeam = room.currentTeam === 1 ? 2 : 1;
+  if (room.teams[proposedTeam] && room.teams[proposedTeam].length > 0) {
+    room.currentTeam = proposedTeam;
+  } else if (room.teams[room.currentTeam].length === 0) {
+    // both teams empty, nothing to do
+    return;
+  }
+
   if (room.teams[room.currentTeam].length === 0) return;
 
   room.describer = room.teams[room.currentTeam][0];
