@@ -172,7 +172,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 5. Reset Game => clears everything
+  // 5. Reset Game => resets status, word, timer, and scores
   socket.on('resetGame', ({ roomName }) => {
     const room = rooms[roomName];
     if (!room) return;
