@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { pickRandomWord, generateFunnyName } from './helpers';
 
 const app = express();
 const httpServer = createServer(app);
@@ -33,31 +34,7 @@ interface RoomState {
 
 const rooms: Record<string, RoomState> = {};
 
-const WORDS = [
-  "apple", "banana", "table", "soccer", "javascript",
-  "elephant", "kangaroo", "avocado", "spaceship",
-  "submarine", "lighthouse", "telescope", "catch phrase",
-];
-
-// Example silly name pieces (adjective + noun)
-const SILLY_ADJECTIVES = [
-  "Funky", "Flying", "Sparkly", "Noisy", "Jolly", "Zany", "Fuzzy", "Cuddly"
-];
-const SILLY_NOUNS = [
-  "Avocado", "Taco", "Penguin", "Panda", "Banana", "Ninja", "Tiger", "Unicorn"
-];
-
-function pickRandomWord() {
-  const idx = Math.floor(Math.random() * WORDS.length);
-  return WORDS[idx];
-}
-
-// Return something like "FlyingAvocado"
-function generateFunnyName(): string {
-  const adj = SILLY_ADJECTIVES[Math.floor(Math.random() * SILLY_ADJECTIVES.length)];
-  const noun = SILLY_NOUNS[Math.floor(Math.random() * SILLY_NOUNS.length)];
-  return `${adj}${noun}`;
-}
+// helper functions are in a separate module
 
 // --------------------------------
 // Socket Events
