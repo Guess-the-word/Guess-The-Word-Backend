@@ -277,12 +277,23 @@ function nextTurn(roomName: string) {
   const room = rooms[roomName];
   if (!room) return;
 
-  const proposedTeam = room.currentTeam === 1 ? 2 : 1;
-  if (room.teams[proposedTeam] && room.teams[proposedTeam].length > 0) {
-    room.currentTeam = proposedTeam;
-  } else if (room.teams[room.currentTeam].length === 0) {
-    // both teams empty, nothing to do
+  const otherTeam = room.currentTeam === 1 ? 2 : 1;
+  const otherHasPlayers =
+    room.teams[otherTeam] && room.teams[otherTeam].length > 0;
+  const currentHasPlayers =
+    room.teams[room.currentTeam] && room.teams[room.currentTeam].length > 0;
+
+  if (!currentHasPlayers && !otherHasPlayers) {
+    // No players in either team
     return;
+  }
+
+  if (!currentHasPlayers && otherHasPlayers) {
+    // switch if current team empty but other has players
+    room.currentTeam = otherTeam;
+  } else if (otherHasPlayers) {
+    // switch teams normally when other team has players
+    room.currentTeam = otherTeam;
   }
 
   if (room.teams[room.currentTeam].length === 0) return;
@@ -307,6 +318,10 @@ app.get('/health', (req, res) => {
 });
 
 const PORT = process.env.PORT || 4000;
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+if (require.main === module) {
+  httpServer.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+}
+
+export { rooms, startTimer, nextTurn };
