@@ -4,6 +4,19 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import { pickRandomWord, generateFunnyName } from './helpers';
 
+interface RoomState {
+  players: string[];
+  status: 'waiting' | 'playing';
+  teams: { [teamId: string]: string[] };
+  currentTeam: number;
+  describer: string | null;
+  word: string | null;
+  score: { [teamId: string]: number };
+  timer: NodeJS.Timeout | null;
+  timeLeft: number;
+  nicknames: Record<string, string>;
+}
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -16,77 +29,95 @@ const io = new Server(httpServer, {
 app.use(cors());
 app.use(express.json());
 
-// --------------------------------
-// Types & In-Memory State
-// --------------------------------
-interface RoomState {
-  players: string[];
-  status: 'waiting' | 'playing';
-  teams: { [teamId: string]: string[] };
-  currentTeam: number;
-  describer: string | null;
-  word: string | null;
-  score: { [teamId: string]: number };
-  timer: NodeJS.Timeout | null;
-  timeLeft: number;
-  nicknames: Record<string, string>; // NEW: to map socket.id -> funny name
-}
-
 const rooms: Record<string, RoomState> = {};
+const GAME_DURATION = 60;
 
-// helper functions are in a separate module
-
-// Helper function to remove a player from a room
-function removePlayerFromRoom(socketId: string, roomName: string) {
+function removePlayerFromRoom(socketId: string, roomName: string): boolean {
   const room = rooms[roomName];
   if (!room) return false;
 
-  // Remove from players list
   const playerIndex = room.players.indexOf(socketId);
-  if (playerIndex === -1) return false; // Player wasn't in this room
+  if (playerIndex === -1) return false;
 
   room.players.splice(playerIndex, 1);
   delete room.nicknames[socketId];
 
-  // Remove from teams
   for (const arr of Object.values(room.teams)) {
     const idx = arr.indexOf(socketId);
     if (idx >= 0) arr.splice(idx, 1);
   }
 
-  // If this was the describer, we need to handle the game state
   if (room.describer === socketId) {
-    if (room.timer) {
-      clearInterval(room.timer);
-      room.timer = null;
-    }
-    // Move to next turn or stop the game if no players left
+    clearGameTimer(room);
     if (room.players.length > 0) {
       nextTurn(roomName);
     } else {
-      room.status = 'waiting';
-      room.describer = null;
-      room.word = null;
+      resetGameState(room);
     }
   }
 
-  // If room is empty, delete it
   if (room.players.length === 0) {
-    if (room.timer) clearInterval(room.timer);
+    clearGameTimer(room);
     delete rooms[roomName];
-    return true; // Room was deleted
+    return true;
   }
 
-  return true; // Player was removed successfully
+  return true;
 }
 
-// --------------------------------
-// Socket Events
-// --------------------------------
+function clearGameTimer(room: RoomState): void {
+  if (room.timer) {
+    clearInterval(room.timer);
+    room.timer = null;
+  }
+}
+
+function resetGameState(room: RoomState): void {
+  room.status = 'waiting';
+  room.describer = null;
+  room.word = null;
+}
+
+function initializeRoom(roomName: string): RoomState {
+  return {
+    players: [],
+    status: 'waiting',
+    teams: {},
+    currentTeam: 1,
+    describer: null,
+    word: null,
+    score: {},
+    timer: null,
+    timeLeft: 0,
+    nicknames: {},
+  };
+}
+
+function ensureTeamsExist(room: RoomState): void {
+  if (Object.keys(room.teams).length === 0) {
+    room.teams['1'] = [];
+    room.teams['2'] = [];
+    room.score['1'] = 0;
+    room.score['2'] = 0;
+  }
+}
+
+function addPlayerToRoom(socketId: string, room: RoomState): void {
+  if (!room.players.includes(socketId)) {
+    room.players.push(socketId);
+    room.nicknames[socketId] = generateFunnyName();
+  }
+
+  ensureTeamsExist(room);
+  
+  if (!room.teams['1'].includes(socketId) && !room.teams['2'].includes(socketId)) {
+    room.teams['1'].push(socketId);
+  }
+}
+
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  // Minimal WebRTC relay
   socket.on('webrtc-signal', (payload) => {
     io.to(payload.target).emit('webrtc-signal', {
       signal: payload.signal,
@@ -94,69 +125,31 @@ io.on('connection', (socket) => {
     });
   });
 
-  // 1. Join or Create a Room
   socket.on('joinRoom', ({ roomName }) => {
     if (!rooms[roomName]) {
-      rooms[roomName] = {
-        players: [],
-        status: 'waiting',
-        teams: {},
-        currentTeam: 1,
-        describer: null,
-        word: null,
-        score: {},
-        timer: null,
-        timeLeft: 0,
-        nicknames: {}, // initialize
-      };
+      rooms[roomName] = initializeRoom(roomName);
     }
+    
     const room = rooms[roomName];
-
-    // If the user hasn't joined yet
-    if (!room.players.includes(socket.id)) {
-      room.players.push(socket.id);
-      // Generate a name for them
-      room.nicknames[socket.id] = generateFunnyName();
-    }
+    addPlayerToRoom(socket.id, room);
     socket.join(roomName);
-
-    // If no teams exist, create them
-    if (Object.keys(room.teams).length === 0) {
-      room.teams['1'] = [];
-      room.teams['2'] = [];
-      room.score['1'] = 0;
-      room.score['2'] = 0;
-    }
-    // For simplicity, put all new players in Team 1
-    if (!room.teams['1'].includes(socket.id) && !room.teams['2'].includes(socket.id)) {
-      room.teams['1'].push(socket.id);
-    }
-
     broadcastRoomUpdate(roomName);
   });
 
-  // NEW: Handle explicit leave room requests
   socket.on('leaveRoom', ({ roomName }) => {
     console.log(`Player ${socket.id} is leaving room ${roomName}`);
-    
-    // Leave the socket room
     socket.leave(roomName);
     
-    // Remove player from room state
     const roomExists = removePlayerFromRoom(socket.id, roomName);
-    
-    // Broadcast update to remaining players
     if (roomExists && rooms[roomName]) {
       broadcastRoomUpdate(roomName);
     }
   });
 
-  // 2. Switch Team
   socket.on('switchTeam', ({ roomName, newTeam }) => {
     const room = rooms[roomName];
     if (!room) return;
 
-    // remove from old team
     for (const [teamId, arr] of Object.entries(room.teams)) {
       const i = arr.indexOf(socket.id);
       if (i >= 0) arr.splice(i, 1);
@@ -167,29 +160,24 @@ io.on('connection', (socket) => {
       room.score[newTeam] = 0;
     }
     room.teams[newTeam].push(socket.id);
-
     broadcastRoomUpdate(roomName);
   });
 
-  // 3. Start Game
   socket.on('startGame', ({ roomName }) => {
     const room = rooms[roomName];
     if (!room) return;
+    
+    const availableTeam = room.teams['1'].length > 0 ? 1 : 
+                         room.teams['2'].length > 0 ? 2 : null;
+    
+    if (!availableTeam) return;
+    
     room.status = 'playing';
-
-    // pick the first team that has players
-    if (room.teams['1'].length > 0) {
-      room.currentTeam = 1;
-    } else if (room.teams['2'].length > 0) {
-      room.currentTeam = 2;
-    } else {
-      // no players to start the game
-      return;
-    }
-
+    room.currentTeam = availableTeam;
     room.describer = room.teams[room.currentTeam][0] || null;
     room.word = pickRandomWord();
-    startTimer(roomName, 60);
+    
+    startTimer(roomName, GAME_DURATION);
 
     io.to(roomName).emit('gameStarted', {
       status: room.status,
@@ -197,20 +185,21 @@ io.on('connection', (socket) => {
       describer: room.describer,
       score: room.score,
     });
+    
     if (room.describer) {
       io.to(room.describer).emit('yourWord', { word: room.word });
     }
   });
 
-  // 4. Guess Word => correct or not
   socket.on('guessWord', ({ roomName, guess }) => {
     const room = rooms[roomName];
     if (!room || !room.word) return;
 
     const isCorrect = guess.toLowerCase() === room.word.toLowerCase();
+    
     if (isCorrect) {
       room.score[room.currentTeam] = (room.score[room.currentTeam] || 0) + 1;
-
+      
       io.to(roomName).emit('guessResult', {
         guess,
         correct: true,
@@ -218,11 +207,8 @@ io.on('connection', (socket) => {
         word: room.word,
         score: room.score,
       });
-
-      if (room.timer) {
-        clearInterval(room.timer);
-        room.timer = null;
-      }
+      
+      clearGameTimer(room);
       nextTurn(roomName);
     } else {
       io.to(roomName).emit('guessResult', {
@@ -232,19 +218,14 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 5. Reset Game => resets status, word, timer, and scores
   socket.on('resetGame', ({ roomName }) => {
     const room = rooms[roomName];
     if (!room) return;
 
-    room.status = 'waiting';
-    room.word = null;
-    room.describer = null;
-    if (room.timer) {
-      clearInterval(room.timer);
-      room.timer = null;
-    }
+    resetGameState(room);
+    clearGameTimer(room);
     room.timeLeft = 0;
+    
     Object.keys(room.score).forEach((key) => {
       room.score[key] = 0;
     });
@@ -252,17 +233,14 @@ io.on('connection', (socket) => {
     broadcastRoomUpdate(roomName);
   });
 
-  // 6. Disconnect => clean up (fallback for unexpected disconnections)
   socket.on('disconnect', () => {
     console.log(`Client disconnected: ${socket.id}`);
     
-    // Check all rooms for this player
     Object.entries(rooms).forEach(([roomName, room]) => {
       if (room.players.includes(socket.id)) {
         console.log(`Removing ${socket.id} from room ${roomName} due to disconnect`);
         removePlayerFromRoom(socket.id, roomName);
         
-        // Broadcast update to remaining players if room still exists
         if (rooms[roomName]) {
           broadcastRoomUpdate(roomName);
         }
@@ -271,8 +249,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// Helper to broadcast updated room info
-function broadcastRoomUpdate(roomName: string) {
+function broadcastRoomUpdate(roomName: string): void {
   const room = rooms[roomName];
   if (!room) return;
 
@@ -285,12 +262,11 @@ function broadcastRoomUpdate(roomName: string) {
     teams: room.teams,
     score: room.score,
     currentTeam: room.currentTeam,
-    nicknames: room.nicknames, // <--- pass the names
+    nicknames: room.nicknames,
   });
 }
 
-// Timer & Next Turn
-function startTimer(roomName: string, duration: number) {
+function startTimer(roomName: string, duration: number): void {
   const room = rooms[roomName];
   if (!room) return;
 
@@ -298,24 +274,24 @@ function startTimer(roomName: string, duration: number) {
   room.timer = setInterval(() => {
     room.timeLeft -= 1;
     io.to(roomName).emit('timerUpdate', { timeLeft: room.timeLeft });
+    
     if (room.timeLeft <= 0) {
-      clearInterval(room.timer!);
-      room.timer = null;
+      clearGameTimer(room);
       io.to(roomName).emit('timeUp', {});
       nextTurn(roomName);
     }
   }, 1000);
 }
 
-function nextTurn(roomName: string) {
+function nextTurn(roomName: string): void {
   const room = rooms[roomName];
   if (!room) return;
 
   const proposedTeam = room.currentTeam === 1 ? 2 : 1;
+  
   if (room.teams[proposedTeam] && room.teams[proposedTeam].length > 0) {
     room.currentTeam = proposedTeam;
   } else if (room.teams[room.currentTeam].length === 0) {
-    // both teams empty, nothing to do
     return;
   }
 
@@ -323,19 +299,19 @@ function nextTurn(roomName: string) {
 
   room.describer = room.teams[room.currentTeam][0];
   room.word = pickRandomWord();
-  startTimer(roomName, 60);
+  startTimer(roomName, GAME_DURATION);
 
   io.to(roomName).emit('nextTurn', {
     currentTeam: room.currentTeam,
     describer: room.describer,
     score: room.score,
   });
+  
   if (room.describer) {
     io.to(room.describer).emit('yourWord', { word: room.word });
   }
 }
 
-// Express
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
