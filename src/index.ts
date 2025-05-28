@@ -59,6 +59,50 @@ function generateFunnyName(): string {
   return `${adj}${noun}`;
 }
 
+// Helper function to remove a player from a room
+function removePlayerFromRoom(socketId: string, roomName: string) {
+  const room = rooms[roomName];
+  if (!room) return false;
+
+  // Remove from players list
+  const playerIndex = room.players.indexOf(socketId);
+  if (playerIndex === -1) return false; // Player wasn't in this room
+
+  room.players.splice(playerIndex, 1);
+  delete room.nicknames[socketId];
+
+  // Remove from teams
+  for (const arr of Object.values(room.teams)) {
+    const idx = arr.indexOf(socketId);
+    if (idx >= 0) arr.splice(idx, 1);
+  }
+
+  // If this was the describer, we need to handle the game state
+  if (room.describer === socketId) {
+    if (room.timer) {
+      clearInterval(room.timer);
+      room.timer = null;
+    }
+    // Move to next turn or stop the game if no players left
+    if (room.players.length > 0) {
+      nextTurn(roomName);
+    } else {
+      room.status = 'waiting';
+      room.describer = null;
+      room.word = null;
+    }
+  }
+
+  // If room is empty, delete it
+  if (room.players.length === 0) {
+    if (room.timer) clearInterval(room.timer);
+    delete rooms[roomName];
+    return true; // Room was deleted
+  }
+
+  return true; // Player was removed successfully
+}
+
 // --------------------------------
 // Socket Events
 // --------------------------------
@@ -112,6 +156,22 @@ io.on('connection', (socket) => {
     }
 
     broadcastRoomUpdate(roomName);
+  });
+
+  // NEW: Handle explicit leave room requests
+  socket.on('leaveRoom', ({ roomName }) => {
+    console.log(`Player ${socket.id} is leaving room ${roomName}`);
+    
+    // Leave the socket room
+    socket.leave(roomName);
+    
+    // Remove player from room state
+    const roomExists = removePlayerFromRoom(socket.id, roomName);
+    
+    // Broadcast update to remaining players
+    if (roomExists && rooms[roomName]) {
+      broadcastRoomUpdate(roomName);
+    }
   });
 
   // 2. Switch Team
@@ -209,24 +269,19 @@ io.on('connection', (socket) => {
     broadcastRoomUpdate(roomName);
   });
 
-  // 6. Disconnect => clean up
+  // 6. Disconnect => clean up (fallback for unexpected disconnections)
   socket.on('disconnect', () => {
-    Object.entries(rooms).forEach(([rName, room]) => {
-      const i = room.players.indexOf(socket.id);
-      if (i >= 0) {
-        room.players.splice(i, 1);
-        delete room.nicknames[socket.id]; // remove their name
-
-        for (const arr of Object.values(room.teams)) {
-          const idx = arr.indexOf(socket.id);
-          if (idx >= 0) arr.splice(idx, 1);
-        }
-
-        if (room.players.length === 0) {
-          if (room.timer) clearInterval(room.timer);
-          delete rooms[rName];
-        } else {
-          broadcastRoomUpdate(rName);
+    console.log(`Client disconnected: ${socket.id}`);
+    
+    // Check all rooms for this player
+    Object.entries(rooms).forEach(([roomName, room]) => {
+      if (room.players.includes(socket.id)) {
+        console.log(`Removing ${socket.id} from room ${roomName} due to disconnect`);
+        removePlayerFromRoom(socket.id, roomName);
+        
+        // Broadcast update to remaining players if room still exists
+        if (rooms[roomName]) {
+          broadcastRoomUpdate(roomName);
         }
       }
     });
@@ -237,6 +292,8 @@ io.on('connection', (socket) => {
 function broadcastRoomUpdate(roomName: string) {
   const room = rooms[roomName];
   if (!room) return;
+
+  console.log(`Broadcasting room update for ${roomName}. Players: ${room.players.length}`);
 
   io.to(roomName).emit('roomUpdate', {
     roomName,
@@ -271,8 +328,24 @@ function nextTurn(roomName: string) {
   const room = rooms[roomName];
   if (!room) return;
 
+  // If not enough players, stop the game
+  if (room.players.length < 2) {
+    room.status = 'waiting';
+    room.describer = null;
+    room.word = null;
+    if (room.timer) {
+      clearInterval(room.timer);
+      room.timer = null;
+    }
+    broadcastRoomUpdate(roomName);
+    return;
+  }
+
   room.currentTeam = (room.currentTeam === 1) ? 2 : 1;
-  if (room.teams[room.currentTeam].length === 0) return;
+  if (room.teams[room.currentTeam].length === 0) {
+    // Switch back if the other team is empty
+    room.currentTeam = (room.currentTeam === 1) ? 2 : 1;
+  }
 
   room.describer = room.teams[room.currentTeam][0];
   room.word = pickRandomWord();
