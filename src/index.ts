@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { pickRandomWord, generateFunnyName } from './helpers';
 
 const app = express();
 const httpServer = createServer(app);
@@ -33,31 +34,7 @@ interface RoomState {
 
 const rooms: Record<string, RoomState> = {};
 
-const WORDS = [
-  "apple", "banana", "table", "soccer", "javascript",
-  "elephant", "kangaroo", "avocado", "spaceship",
-  "submarine", "lighthouse", "telescope", "catch phrase",
-];
-
-// Example silly name pieces (adjective + noun)
-const SILLY_ADJECTIVES = [
-  "Funky", "Flying", "Sparkly", "Noisy", "Jolly", "Zany", "Fuzzy", "Cuddly"
-];
-const SILLY_NOUNS = [
-  "Avocado", "Taco", "Penguin", "Panda", "Banana", "Ninja", "Tiger", "Unicorn"
-];
-
-function pickRandomWord() {
-  const idx = Math.floor(Math.random() * WORDS.length);
-  return WORDS[idx];
-}
-
-// Return something like "FlyingAvocado"
-function generateFunnyName(): string {
-  const adj = SILLY_ADJECTIVES[Math.floor(Math.random() * SILLY_ADJECTIVES.length)];
-  const noun = SILLY_NOUNS[Math.floor(Math.random() * SILLY_NOUNS.length)];
-  return `${adj}${noun}`;
-}
+// helper functions are in a separate module
 
 // Helper function to remove a player from a room
 function removePlayerFromRoom(socketId: string, roomName: string) {
@@ -200,10 +177,16 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.status = 'playing';
 
-    room.currentTeam = 1;
-    if (room.teams['1'].length === 0) {
+    // pick the first team that has players
+    if (room.teams['1'].length > 0) {
+      room.currentTeam = 1;
+    } else if (room.teams['2'].length > 0) {
       room.currentTeam = 2;
+    } else {
+      // no players to start the game
+      return;
     }
+
     room.describer = room.teams[room.currentTeam][0] || null;
     room.word = pickRandomWord();
     startTimer(roomName, 60);
@@ -249,7 +232,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 5. Reset Game => clears everything
+  // 5. Reset Game => resets status, word, timer, and scores
   socket.on('resetGame', ({ roomName }) => {
     const room = rooms[roomName];
     if (!room) return;
@@ -328,24 +311,15 @@ function nextTurn(roomName: string) {
   const room = rooms[roomName];
   if (!room) return;
 
-  // If not enough players, stop the game
-  if (room.players.length < 2) {
-    room.status = 'waiting';
-    room.describer = null;
-    room.word = null;
-    if (room.timer) {
-      clearInterval(room.timer);
-      room.timer = null;
-    }
-    broadcastRoomUpdate(roomName);
+  const proposedTeam = room.currentTeam === 1 ? 2 : 1;
+  if (room.teams[proposedTeam] && room.teams[proposedTeam].length > 0) {
+    room.currentTeam = proposedTeam;
+  } else if (room.teams[room.currentTeam].length === 0) {
+    // both teams empty, nothing to do
     return;
   }
 
-  room.currentTeam = (room.currentTeam === 1) ? 2 : 1;
-  if (room.teams[room.currentTeam].length === 0) {
-    // Switch back if the other team is empty
-    room.currentTeam = (room.currentTeam === 1) ? 2 : 1;
-  }
+  if (room.teams[room.currentTeam].length === 0) return;
 
   room.describer = room.teams[room.currentTeam][0];
   room.word = pickRandomWord();
