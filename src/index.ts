@@ -10,7 +10,9 @@ interface RoomState {
   teams: { [teamId: string]: string[] };
   currentTeam: number;
   describer: string | null;
+  describerIndexes: { [teamId: string]: number };
   word: string | null;
+  usedWords: string[];
   score: { [teamId: string]: number };
   timer: NodeJS.Timeout | null;
   timeLeft: number;
@@ -31,6 +33,7 @@ app.use(express.json());
 
 const rooms: Record<string, RoomState> = {};
 const GAME_DURATION = 60;
+const TEAM_IDS = ['1', '2'];
 
 function removePlayerFromRoom(socketId: string, roomName: string): boolean {
   const room = rooms[roomName];
@@ -49,11 +52,18 @@ function removePlayerFromRoom(socketId: string, roomName: string): boolean {
 
   if (room.describer === socketId) {
     clearGameTimer(room);
-    if (room.players.length > 0) {
+    if (isGameReady(room).ready) {
       nextTurn(roomName);
     } else {
       resetGameState(room);
     }
+  }
+
+  if (room.status === 'playing' && !isGameReady(room).ready) {
+    resetGameState(room);
+    io.to(roomName).emit('gamePaused', {
+      reason: 'Waiting for players on both teams.',
+    });
   }
 
   if (room.players.length === 0) {
@@ -76,6 +86,9 @@ function resetGameState(room: RoomState): void {
   room.status = 'waiting';
   room.describer = null;
   room.word = null;
+  room.timeLeft = 0;
+  room.usedWords = [];
+  room.describerIndexes = {};
 }
 
 function initializeRoom(roomName: string): RoomState {
@@ -85,7 +98,9 @@ function initializeRoom(roomName: string): RoomState {
     teams: {},
     currentTeam: 1,
     describer: null,
+    describerIndexes: {},
     word: null,
+    usedWords: [],
     score: {},
     timer: null,
     timeLeft: 0,
@@ -94,25 +109,92 @@ function initializeRoom(roomName: string): RoomState {
 }
 
 function ensureTeamsExist(room: RoomState): void {
-  if (Object.keys(room.teams).length === 0) {
-    room.teams['1'] = [];
-    room.teams['2'] = [];
-    room.score['1'] = 0;
-    room.score['2'] = 0;
-  }
+  TEAM_IDS.forEach((teamId) => {
+    if (!room.teams[teamId]) {
+      room.teams[teamId] = [];
+    }
+    if (room.score[teamId] === undefined) {
+      room.score[teamId] = 0;
+    }
+    if (room.describerIndexes[teamId] === undefined) {
+      room.describerIndexes[teamId] = 0;
+    }
+  });
 }
 
-function addPlayerToRoom(socketId: string, room: RoomState): void {
+function sanitizeNickname(nickname?: string): string | undefined {
+  const trimmed = nickname?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.slice(0, 24);
+}
+
+function getPlayerTeam(room: RoomState, socketId: string): string | null {
+  const entry = Object.entries(room.teams).find(([, players]) => players.includes(socketId));
+
+  return entry?.[0] || null;
+}
+
+function addPlayerToRoom(socketId: string, room: RoomState, nickname?: string): void {
   if (!room.players.includes(socketId)) {
     room.players.push(socketId);
-    room.nicknames[socketId] = generateFunnyName();
+    room.nicknames[socketId] = sanitizeNickname(nickname) || generateFunnyName();
+  } else if (nickname) {
+    room.nicknames[socketId] = sanitizeNickname(nickname) || room.nicknames[socketId];
   }
 
   ensureTeamsExist(room);
   
-  if (!room.teams['1'].includes(socketId) && !room.teams['2'].includes(socketId)) {
-    room.teams['1'].push(socketId);
+  if (!getPlayerTeam(room, socketId)) {
+    const targetTeam = room.teams['1'].length <= room.teams['2'].length ? '1' : '2';
+    room.teams[targetTeam].push(socketId);
   }
+}
+
+function isGameReady(room: RoomState): { ready: boolean; reason?: string } {
+  ensureTeamsExist(room);
+
+  if (room.players.length < 2) {
+    return { ready: false, reason: 'At least two players are needed.' };
+  }
+
+  if (room.teams['1'].length === 0 || room.teams['2'].length === 0) {
+    return { ready: false, reason: 'Each team needs at least one player.' };
+  }
+
+  return { ready: true };
+}
+
+function pickRoomWord(room: RoomState): string {
+  const word = pickRandomWord(room.usedWords);
+  room.usedWords.push(word);
+
+  return word;
+}
+
+function normalizeGuess(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+function selectNextDescriber(room: RoomState, teamId: string): string | null {
+  const members = room.teams[teamId] || [];
+
+  if (members.length === 0) {
+    return null;
+  }
+
+  const nextIndex = room.describerIndexes[teamId] % members.length;
+  const describer = members[nextIndex];
+  room.describerIndexes[teamId] = (nextIndex + 1) % members.length;
+
+  return describer;
 }
 
 io.on('connection', (socket) => {
@@ -125,13 +207,13 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('joinRoom', ({ roomName }) => {
+  socket.on('joinRoom', ({ roomName, nickname }) => {
     if (!rooms[roomName]) {
       rooms[roomName] = initializeRoom(roomName);
     }
     
     const room = rooms[roomName];
-    addPlayerToRoom(socket.id, room);
+    addPlayerToRoom(socket.id, room, nickname);
     socket.join(roomName);
     broadcastRoomUpdate(roomName);
   });
@@ -149,33 +231,42 @@ io.on('connection', (socket) => {
   socket.on('switchTeam', ({ roomName, newTeam }) => {
     const room = rooms[roomName];
     if (!room) return;
+    if (room.status === 'playing') {
+      socket.emit('actionRejected', { reason: 'Teams are locked during a round.' });
+      return;
+    }
+    if (!TEAM_IDS.includes(String(newTeam))) {
+      socket.emit('actionRejected', { reason: 'That team is not available.' });
+      return;
+    }
 
     for (const [teamId, arr] of Object.entries(room.teams)) {
       const i = arr.indexOf(socket.id);
       if (i >= 0) arr.splice(i, 1);
     }
 
-    if (!room.teams[newTeam]) {
-      room.teams[newTeam] = [];
-      room.score[newTeam] = 0;
-    }
-    room.teams[newTeam].push(socket.id);
+    ensureTeamsExist(room);
+    room.teams[String(newTeam)].push(socket.id);
     broadcastRoomUpdate(roomName);
   });
 
   socket.on('startGame', ({ roomName }) => {
     const room = rooms[roomName];
     if (!room) return;
+    ensureTeamsExist(room);
+
+    const readiness = isGameReady(room);
+    if (!readiness.ready) {
+      socket.emit('startRejected', { reason: readiness.reason });
+      return;
+    }
     
-    const availableTeam = room.teams['1'].length > 0 ? 1 : 
-                         room.teams['2'].length > 0 ? 2 : null;
-    
-    if (!availableTeam) return;
-    
+    clearGameTimer(room);
     room.status = 'playing';
-    room.currentTeam = availableTeam;
-    room.describer = room.teams[room.currentTeam][0] || null;
-    room.word = pickRandomWord();
+    room.currentTeam = room.teams['1'].length > 0 ? 1 : 2;
+    room.describer = selectNextDescriber(room, String(room.currentTeam));
+    room.word = pickRoomWord(room);
+    room.timeLeft = GAME_DURATION;
     
     startTimer(roomName, GAME_DURATION);
 
@@ -184,6 +275,7 @@ io.on('connection', (socket) => {
       currentTeam: room.currentTeam,
       describer: room.describer,
       score: room.score,
+      timeLeft: room.timeLeft,
     });
     
     if (room.describer) {
@@ -195,7 +287,7 @@ io.on('connection', (socket) => {
     const room = rooms[roomName];
     if (!room || !room.word) return;
 
-    const isCorrect = guess.toLowerCase() === room.word.toLowerCase();
+    const isCorrect = normalizeGuess(guess) === normalizeGuess(room.word);
     
     if (isCorrect) {
       room.score[room.currentTeam] = (room.score[room.currentTeam] || 0) + 1;
@@ -216,6 +308,37 @@ io.on('connection', (socket) => {
         correct: false,
       });
     }
+  });
+
+  socket.on('correctWord', ({ roomName }) => {
+    const room = rooms[roomName];
+    if (!room || !room.word || room.describer !== socket.id) return;
+
+    room.score[room.currentTeam] = (room.score[room.currentTeam] || 0) + 1;
+
+    io.to(roomName).emit('guessResult', {
+      guess: room.word,
+      correct: true,
+      team: room.currentTeam,
+      word: room.word,
+      score: room.score,
+    });
+
+    clearGameTimer(room);
+    nextTurn(roomName);
+  });
+
+  socket.on('skipWord', ({ roomName }) => {
+    const room = rooms[roomName];
+    if (!room || !room.word || room.describer !== socket.id) return;
+
+    io.to(roomName).emit('wordPassed', {
+      team: room.currentTeam,
+      word: room.word,
+    });
+
+    clearGameTimer(room);
+    nextTurn(roomName);
   });
 
   socket.on('resetGame', ({ roomName }) => {
@@ -252,6 +375,7 @@ io.on('connection', (socket) => {
 function broadcastRoomUpdate(roomName: string): void {
   const room = rooms[roomName];
   if (!room) return;
+  ensureTeamsExist(room);
 
   console.log(`Broadcasting room update for ${roomName}. Players: ${room.players.length}`);
 
@@ -262,6 +386,8 @@ function broadcastRoomUpdate(roomName: string): void {
     teams: room.teams,
     score: room.score,
     currentTeam: room.currentTeam,
+    describer: room.describer,
+    timeLeft: room.timeLeft,
     nicknames: room.nicknames,
   });
 }
@@ -270,7 +396,10 @@ function startTimer(roomName: string, duration: number): void {
   const room = rooms[roomName];
   if (!room) return;
 
+  clearGameTimer(room);
   room.timeLeft = duration;
+  io.to(roomName).emit('timerUpdate', { timeLeft: room.timeLeft });
+
   room.timer = setInterval(() => {
     room.timeLeft -= 1;
     io.to(roomName).emit('timerUpdate', { timeLeft: room.timeLeft });
@@ -286,6 +415,15 @@ function startTimer(roomName: string, duration: number): void {
 function nextTurn(roomName: string): void {
   const room = rooms[roomName];
   if (!room) return;
+  ensureTeamsExist(room);
+
+  const readiness = isGameReady(room);
+  if (!readiness.ready) {
+    resetGameState(room);
+    io.to(roomName).emit('gamePaused', { reason: readiness.reason });
+    broadcastRoomUpdate(roomName);
+    return;
+  }
 
   const proposedTeam = room.currentTeam === 1 ? 2 : 1;
   
@@ -297,14 +435,16 @@ function nextTurn(roomName: string): void {
 
   if (room.teams[room.currentTeam].length === 0) return;
 
-  room.describer = room.teams[room.currentTeam][0];
-  room.word = pickRandomWord();
+  room.describer = selectNextDescriber(room, String(room.currentTeam));
+  room.word = pickRoomWord(room);
+  room.timeLeft = GAME_DURATION;
   startTimer(roomName, GAME_DURATION);
 
   io.to(roomName).emit('nextTurn', {
     currentTeam: room.currentTeam,
     describer: room.describer,
     score: room.score,
+    timeLeft: room.timeLeft,
   });
   
   if (room.describer) {
