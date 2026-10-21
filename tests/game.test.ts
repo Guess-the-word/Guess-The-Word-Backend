@@ -13,8 +13,13 @@ const command = (event: string, id = 'a', extra: Record<string, unknown> = {}) =
 const start = (rounds = 3, turnSeconds = 30) => {
   command('updateSettings', 'a', { rounds, turnSeconds });
   expect(command('startGame')).toEqual({ ok: true });
+  jest.advanceTimersByTime(3000);
 };
-const resolve = (event = 'skipWord') => command(event, state().describer!);
+const resolve = (event = 'skipWord') => {
+  const result = command(event, state().describer!);
+  if (state().phase === 'reveal') jest.advanceTimersByTime(5500);
+  return result;
+};
 const finish = () => { while (state().status === 'playing') resolve(); };
 
 beforeEach(() => {
@@ -84,8 +89,9 @@ test.each([3, 5, 7])('%i rounds are exactly two turns each; all passes finish as
 test('the agreed six-turn match ends 2–1 with the exact round breakdown', () => {
   start();
   command('guessWord', 'b', { guess: ` ${state().yourWord!.toUpperCase()}! ` });
+  jest.advanceTimersByTime(5500);
   resolve(); resolve(); resolve('correctWord'); resolve('correctWord');
-  jest.advanceTimersByTime(30000);
+  jest.advanceTimersByTime(32500);
   expect(state().status).toBe('finished');
   expect(state().score).toEqual({ '1': 2, '2': 1 });
   expect(state().winner).toBe('1');
@@ -146,7 +152,7 @@ test('only describer can mark Correct or Pass, and describer cannot submit their
 
 test.each([29999, 30000, 30001])('action at %ims observes the deadline, even before a timer callback runs', elapsed => {
   start();
-  jest.setSystemTime(100000 + elapsed);
+  jest.setSystemTime(103000 + elapsed);
   resolve('correctWord');
   expect(state().history).toHaveLength(1);
   expect(state().history[0].outcome).toBe(elapsed < 30000 ? 'correct' : 'expired');
@@ -164,7 +170,7 @@ test('competing correct/pass/guess requests for a resolved turn cannot resolve a
   game.handle('guessWord', 'b', { ...payload, guess: old.yourWord, actionId: 'third' });
   expect(state().history).toHaveLength(1);
   expect(state().score).toEqual({ '1': 1, '2': 0 });
-  jest.advanceTimersByTime(30000);
+  jest.advanceTimersByTime(35500);
   expect(state().history).toHaveLength(2);
 });
 
@@ -282,4 +288,65 @@ test('malformed payloads, oversized input and special object keys are safely han
   start();
   for (const guess of [null, 42, {}, '', ' '.repeat(10), 'a'.repeat(121)]) expect(command('guessWord', 'b', { guess }).ok).toBe(false);
   expect(state().status).toBe('playing');
+});
+
+
+test('countdown is synchronized, hides the word and cannot consume guessing time', () => {
+  command('startGame');
+  expect(state()).toMatchObject({ phase: 'countdown', phaseSeconds: 3, timeLeft: 60, yourWord: null });
+  expect(state('b').phaseSeconds).toBe(3);
+  expect(command('correctWord').ok).toBe(false);
+  expect(command('guessWord', 'b', { guess: 'anything' }).ok).toBe(false);
+  jest.advanceTimersByTime(2000);
+  join('c');
+  expect(state('c')).toMatchObject({ phase: 'countdown', phaseSeconds: 1, yourWord: null });
+  jest.advanceTimersByTime(1000);
+  expect(state()).toMatchObject({ phase: 'active', timeLeft: 60 });
+  expect(state().yourWord).toEqual(expect.any(String));
+  expect(state('b').yourWord).toBeNull();
+});
+
+test.each(['correctWord', 'skipWord', 'timeout'])('%s reveals once to everyone before advancing', event => {
+  start();
+  const word = state().yourWord;
+  if (event === 'timeout') jest.advanceTimersByTime(30000);
+  else command(event);
+  expect(state()).toMatchObject({ phase: 'reveal', turnId: 0, timeLeft: 0, yourWord: null });
+  expect(state('b').history[0].word).toBe(word);
+  join('c');
+  expect(state('c').history[0].word).toBe(word);
+  expect(command('correctWord').ok).toBe(false);
+  expect(command('guessWord', 'b', { guess: word }).ok).toBe(false);
+  expect(state().history).toHaveLength(1);
+  jest.advanceTimersByTime(2500);
+  expect(state()).toMatchObject({ phase: 'countdown', turnId: 1, timeLeft: 30 });
+  expect(state('b').yourWord).toBeNull();
+  jest.advanceTimersByTime(3000);
+  expect(state('b')).toMatchObject({ phase: 'active', timeLeft: 30 });
+  expect(state('b').yourWord).toEqual(expect.any(String));
+});
+
+test.each(['countdown', 'reveal'])('leaving during %s cancels pending transitions', phase => {
+  command('startGame');
+  if (phase === 'reveal') { jest.advanceTimersByTime(3000); command('correctWord'); }
+  game.leave('b');
+  expect(state().status).toBe('waiting');
+  expect(jest.getTimerCount()).toBe(0);
+  jest.advanceTimersByTime(100000);
+  expect(state().status).toBe('waiting');
+  expect(state().history).toEqual([]);
+});
+
+test('the final word gets its reveal before results and rematch unlock', () => {
+  start();
+  for (let turn = 0; turn < 5; turn++) resolve();
+  command('correctWord', state().describer!);
+  expect(state()).toMatchObject({ status: 'playing', phase: 'reveal', winner: null });
+  expect(state().history).toHaveLength(6);
+  expect(command('resetGame').ok).toBe(false);
+  jest.advanceTimersByTime(2499);
+  expect(state().status).toBe('playing');
+  jest.advanceTimersByTime(1);
+  expect(state()).toMatchObject({ status: 'finished', winner: '2' });
+  expect(jest.getTimerCount()).toBe(0);
 });
