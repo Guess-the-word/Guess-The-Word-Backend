@@ -1,5 +1,6 @@
 export type Team = '1' | '2';
 export type Status = 'waiting' | 'playing' | 'finished';
+export type TurnPhase = 'countdown' | 'active' | 'reveal';
 export interface Settings {
     rounds: number;
     turnSeconds: number;
@@ -26,6 +27,7 @@ export interface RoomSnapshot {
     teams: Record<Team, string[]>;
     waitingPlayers: string[];
     status: Status;
+    phase: TurnPhase;
     settings: Settings;
     lobbyId: string;
     matchId: string | null;
@@ -35,6 +37,7 @@ export interface RoomSnapshot {
     describer: string | null;
     yourWord: string | null;
     timeLeft: number;
+    phaseSeconds: number;
     score: Record<Team, number>;
     history: TurnResult[];
     guesses: GuessEntry[];
@@ -60,12 +63,15 @@ export declare class MatchRooms {
     leave(playerId: string): void;
     private play;
     private beginTurn;
+    private setPhase;
     private resolveTurn;
+    private advanceTurn;
     private returnToLobby;
     private assignTeam;
     private removeFromTeams;
     private host;
     private round;
+    private phaseSeconds;
     private timeLeft;
     private clearTimer;
     snapshot(playerId: string): RoomSnapshot | undefined;

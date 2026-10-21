@@ -23,8 +23,15 @@ The frontend repository contains `scripts/test-multiplayer.cjs`, which runs agai
 
 ## Match behavior
 
-The first connected player hosts and chooses 3, 5, or 7 rounds and 30, 60, or 90 seconds per turn. Each round has one turn per team. Correct answers score for the active team; correct, pass, and timeout each advance one turn. Only the describer receives the secret word.
+The first connected player hosts and chooses 3, 5, or 7 rounds and 30, 60, or 90 seconds per turn. Each round has one turn per team. Correct answers score for the active team. Each turn starts with a synchronized 3-second countdown; only then is the secret sent to the describer and the full guessing timer started. Correct, pass, and timeout each resolve one turn, reveal its word to everyone for 2.5 seconds, then advance to the next countdown or final results.
 
 The server validates membership, permissions, match and turn identifiers, and deadlines. Results survive player departures. The host can return everyone to the lobby for a rematch; arrivals during play or results wait until then. A participating player leaving an active match cancels it and returns the room to the lobby. Host ownership passes to the earliest remaining player.
 
 Rooms are held in memory and removed when empty. Each connection is a distinct player, even when names match; refreshing is a departure followed by a new connection. See the frontend README for the full rules and manual acceptance checklist.
+
+
+## Turn phases
+
+While `status` is `playing`, snapshots include `phase` (`countdown`, `active`, or `reveal`) and `phaseSeconds` (seconds left in that phase). `timeLeft` is the configured guessing duration during countdown, the remaining guessing time during active play, and zero during reveal. The completed word is available through the latest `history` entry during reveal. `turnId` advances after the reveal, and actions outside the active phase are rejected. Server timers own every transition; late arrivals receive the current phase without restarting it. Leaving as a participant cancels countdowns and reveals just like active guessing.
+
+Deploy the companion frontend first; it supports both the original snapshots and these additive phase fields. The frontend transition UI should be live before enabling this backend's countdown/reveal pauses.

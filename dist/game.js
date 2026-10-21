@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.MatchRooms = void 0;
 const crypto_1 = require("crypto");
 const helpers_1 = require("./helpers");
+const COUNTDOWN_MS = 3000;
+const REVEAL_MS = 2500;
 const success = { ok: true };
 const fail = (error) => ({ ok: false, error });
 const normalizeGuess = (value) => value.trim().toLowerCase()
@@ -88,7 +90,7 @@ class MatchRooms {
         if (!room) {
             room = {
                 name: data.roomName, players: new Map(), teams: { '1': [], '2': [] }, participants: new Set(),
-                status: 'waiting', settings: { rounds: 3, turnSeconds: 60 }, lobbyId: (0, crypto_1.randomUUID)(),
+                status: 'waiting', phase: 'active', settings: { rounds: 3, turnSeconds: 60 }, lobbyId: (0, crypto_1.randomUUID)(),
                 matchId: null, turnId: 0, currentTeam: '1', describer: null,
                 describerIndexes: { '1': 0, '2': 0 }, word: null, usedWords: [], deadline: 0,
                 timer: null, score: { '1': 0, '2': 0 }, history: [], guesses: [], seenActions: new Set(), notice: '',
@@ -129,6 +131,8 @@ class MatchRooms {
     play(room, playerId, event, data) {
         if (room.status !== 'playing' || data.matchId !== room.matchId || data.turnId !== room.turnId)
             return fail('That turn has already ended.');
+        if (room.phase !== 'active')
+            return fail('Wait for the next word.');
         if (!room.participants.has(playerId))
             return fail('You are waiting for the next match.');
         if (event !== 'guessWord' && room.describer !== playerId)
@@ -166,28 +170,41 @@ class MatchRooms {
         room.describerIndexes[room.currentTeam]++;
         room.word = (0, helpers_1.pickRandomWord)(room.usedWords);
         room.usedWords.push(room.word);
-        room.deadline = this.now() + room.settings.turnSeconds * 1000;
         room.seenActions.clear();
+        this.setPhase(room, 'countdown', COUNTDOWN_MS);
+    }
+    setPhase(room, phase, duration) {
+        this.clearTimer(room);
+        room.phase = phase;
+        room.deadline = this.now() + duration;
         const matchId = room.matchId;
         const turnId = room.turnId;
-        let previousSeconds = room.settings.turnSeconds;
-        this.clearTimer(room);
+        let previousSeconds = this.phaseSeconds(room);
         room.timer = setInterval(() => {
-            // Queued callbacks must not expire a newer turn or a recreated room.
-            if (this.rooms.get(room.name) !== room || room.status !== 'playing' || room.matchId !== matchId || room.turnId !== turnId)
+            // Ignore callbacks queued before a phase, match, or room was replaced.
+            if (this.rooms.get(room.name) !== room || room.status !== 'playing' ||
+                room.matchId !== matchId || room.turnId !== turnId || room.phase !== phase)
                 return;
-            const seconds = this.timeLeft(room);
-            if (this.now() >= room.deadline)
-                this.resolveTurn(room, 'expired');
-            else if (seconds !== previousSeconds) {
-                previousSeconds = seconds;
-                this.broadcast(room);
+            if (this.now() >= room.deadline) {
+                if (phase === 'countdown')
+                    this.setPhase(room, 'active', room.settings.turnSeconds * 1000);
+                else if (phase === 'active')
+                    this.resolveTurn(room, 'expired');
+                else
+                    this.advanceTurn(room);
+            }
+            else {
+                const seconds = this.phaseSeconds(room);
+                if (seconds !== previousSeconds) {
+                    previousSeconds = seconds;
+                    this.broadcast(room);
+                }
             }
         }, 250);
         this.broadcast(room);
     }
     resolveTurn(room, outcome) {
-        if (room.status !== 'playing' || room.word === null)
+        if (room.status !== 'playing' || room.phase !== 'active' || room.word === null)
             return;
         this.clearTimer(room);
         const points = outcome === 'correct' ? 1 : 0;
@@ -195,6 +212,10 @@ class MatchRooms {
         room.history.push({ round: this.round(room), team: room.currentTeam, outcome, points,
             word: room.word, describerName: room.players.get(room.describer) });
         room.word = null;
+        this.setPhase(room, 'reveal', REVEAL_MS);
+    }
+    advanceTurn(room) {
+        this.clearTimer(room);
         room.turnId++;
         if (room.turnId === room.settings.rounds * 2) {
             room.status = 'finished';
@@ -208,6 +229,7 @@ class MatchRooms {
     returnToLobby(room, notice) {
         this.clearTimer(room);
         room.status = 'waiting';
+        room.phase = 'active';
         room.lobbyId = (0, crypto_1.randomUUID)();
         room.matchId = null;
         room.turnId = 0;
@@ -238,7 +260,12 @@ class MatchRooms {
     }
     host(room) { return room.players.keys().next().value; }
     round(room) { return Math.min(Math.floor(room.turnId / 2) + 1, room.settings.rounds); }
-    timeLeft(room) { return room.status === 'playing' ? Math.max(0, Math.ceil((room.deadline - this.now()) / 1000)) : 0; }
+    phaseSeconds(room) { return room.status === 'playing' ? Math.max(0, Math.ceil((room.deadline - this.now()) / 1000)) : 0; }
+    timeLeft(room) {
+        if (room.status !== 'playing')
+            return 0;
+        return room.phase === 'countdown' ? room.settings.turnSeconds : room.phase === 'active' ? this.phaseSeconds(room) : 0;
+    }
     clearTimer(room) { if (room.timer)
         clearInterval(room.timer); room.timer = null; }
     snapshot(playerId) {
@@ -250,9 +277,9 @@ class MatchRooms {
             roomName: room.name, players: [...room.players.keys()], nicknames: Object.fromEntries(room.players),
             hostId: this.host(room), teams: { '1': [...room.teams['1']], '2': [...room.teams['2']] },
             waitingPlayers: [...room.players.keys()].filter(id => !room.teams['1'].includes(id) && !room.teams['2'].includes(id)),
-            status: room.status, settings: { ...room.settings }, lobbyId: room.lobbyId, matchId: room.matchId,
+            status: room.status, phase: room.phase, phaseSeconds: this.phaseSeconds(room), settings: { ...room.settings }, lobbyId: room.lobbyId, matchId: room.matchId,
             turnId: room.turnId, round: this.round(room), currentTeam: room.currentTeam, describer: room.describer,
-            yourWord: room.status === 'playing' && room.describer === playerId ? room.word : null,
+            yourWord: room.status === 'playing' && room.phase === 'active' && room.describer === playerId ? room.word : null,
             timeLeft: this.timeLeft(room), score: { ...room.score }, history: room.history.map(turn => ({ ...turn })),
             guesses: room.guesses.map(guess => ({ ...guess })), notice: room.notice,
             winner: room.status !== 'finished' ? null : room.score['1'] === room.score['2'] ? 'draw' : room.score['1'] > room.score['2'] ? '1' : '2',
